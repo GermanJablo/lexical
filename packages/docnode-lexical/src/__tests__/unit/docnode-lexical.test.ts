@@ -1,7 +1,13 @@
 /* eslint-disable header/header */
 
 import {Doc} from 'docnode';
-import {type SerializedParagraphNode, type SerializedTextNode} from 'lexical';
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getRoot,
+  type SerializedParagraphNode,
+  type SerializedTextNode,
+} from 'lexical';
 import {describe, expect, test} from 'vitest';
 
 import {docToLexical, LexicalDocNode} from '../../exports';
@@ -116,5 +122,257 @@ describe('docnode to lexical', () => {
         version: 1,
       },
     });
+  });
+});
+
+describe('lexical to docnode sync', () => {
+  test('add paragraph to empty editor', () => {
+    const {editor, doc} = docToLexical({
+      namespace: 'MyEditor',
+      onError: (error) => {
+        console.error(error);
+      },
+    });
+
+    // Initially empty
+    expect(doc.root.first).toBeUndefined();
+
+    // Add a paragraph in Lexical
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const paragraph = $createParagraphNode();
+        root.append(paragraph);
+      },
+      {discrete: true},
+    );
+
+    // Should sync to DocNode synchronously
+    expect(doc.root.first).toBeDefined();
+    const docChild = doc.root.first!;
+    expect(docChild.is(LexicalDocNode)).toBe(true);
+    const json = docChild.state.j.get();
+    expect(json.type).toBe('paragraph');
+  });
+
+  test('add text to paragraph', () => {
+    const {editor, doc} = docToLexical({
+      namespace: 'MyEditor',
+      onError: (error) => {
+        console.error(error);
+      },
+    });
+
+    // Add paragraph with text
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const paragraph = $createParagraphNode();
+        const text = $createTextNode('Hello, world!');
+        paragraph.append(text);
+        root.append(paragraph);
+      },
+      {discrete: true},
+    );
+
+    // Verify structure in DocNode
+    expect(doc.root.first).toBeDefined();
+    const docParagraph = doc.root.first!;
+    expect(docParagraph.is(LexicalDocNode)).toBe(true);
+
+    const paragraphJson = docParagraph.state.j.get();
+    expect(paragraphJson.type).toBe('paragraph');
+
+    // Check text node
+    const docText = docParagraph.first!;
+    expect(docText.is(LexicalDocNode)).toBe(true);
+    const textJson = docText.state.j.get();
+    expect(textJson.type).toBe('text');
+    expect((textJson as SerializedTextNode).text).toBe('Hello, world!');
+  });
+
+  test('add multiple paragraphs', () => {
+    const {editor, doc} = docToLexical({
+      namespace: 'MyEditor',
+      onError: (error) => {
+        console.error(error);
+      },
+    });
+
+    // Add two paragraphs
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const p1 = $createParagraphNode();
+        const t1 = $createTextNode('First');
+        p1.append(t1);
+
+        const p2 = $createParagraphNode();
+        const t2 = $createTextNode('Second');
+        p2.append(t2);
+
+        root.append(p1, p2);
+      },
+      {discrete: true},
+    );
+
+    // Verify both paragraphs
+    expect(doc.root.first).toBeDefined();
+    expect(doc.root.first!.next).toBeDefined();
+
+    const docP1 = doc.root.first!;
+    const text1 = (docP1.first!.state.j.get() as SerializedTextNode).text;
+    expect(text1).toBe('First');
+
+    const docP2 = docP1.next!;
+    const text2 = (docP2.first!.state.j.get() as SerializedTextNode).text;
+    expect(text2).toBe('Second');
+  });
+
+  test('update existing text', () => {
+    const {editor, doc} = docToLexical({
+      namespace: 'MyEditor',
+      onError: (error) => {
+        console.error(error);
+      },
+    });
+
+    // Add initial text
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const paragraph = $createParagraphNode();
+        const text = $createTextNode('Initial');
+        paragraph.append(text);
+        root.append(paragraph);
+      },
+      {discrete: true},
+    );
+
+    // Verify initial state
+    const docText1 = doc.root.first!.first!;
+    expect((docText1.state.j.get() as SerializedTextNode).text).toBe('Initial');
+
+    // Update the text
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const paragraph = root.getFirstChild();
+        const text = paragraph?.getFirstChild();
+        if (text) {
+          text.getWritable().setTextContent('Updated');
+        }
+      },
+      {discrete: true},
+    );
+
+    // Verify updated state
+    const docText2 = doc.root.first!.first!;
+    expect((docText2.state.j.get() as SerializedTextNode).text).toBe('Updated');
+  });
+
+  test('remove paragraph', async () => {
+    const {editor, doc} = docToLexical({
+      namespace: 'MyEditor',
+      onError: (error) => {
+        console.error(error);
+      },
+    });
+
+    // Add two paragraphs
+    await new Promise<void>((resolve) => {
+      editor.update(() => {
+        const root = $getRoot();
+        const p1 = $createParagraphNode();
+        p1.append($createTextNode('First'));
+        const p2 = $createParagraphNode();
+        p2.append($createTextNode('Second'));
+        root.append(p1, p2);
+      });
+      queueMicrotask(() => {
+        queueMicrotask(resolve);
+      });
+    });
+
+    expect(doc.root.first).toBeDefined();
+    expect(doc.root.first!.next).toBeDefined();
+
+    // Remove first paragraph
+    await new Promise<void>((resolve) => {
+      editor.update(() => {
+        const root = $getRoot();
+        const first = root.getFirstChild();
+        first?.remove();
+      });
+      queueMicrotask(() => {
+        queueMicrotask(resolve);
+      });
+    });
+
+    // Verify only second paragraph remains
+    expect(doc.root.first).toBeDefined();
+    expect(doc.root.first!.next).toBeUndefined();
+    const remaining = doc.root.first!.first!;
+    expect((remaining.state.j.get() as SerializedTextNode).text).toBe('Second');
+  });
+
+  test('complex edit sequence', () => {
+    const {editor, doc} = docToLexical({
+      namespace: 'MyEditor',
+      onError: (error) => {
+        console.error(error);
+      },
+    });
+
+    // Step 1: Add initial content
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const p1 = $createParagraphNode();
+        p1.append($createTextNode('One'));
+        const p2 = $createParagraphNode();
+        p2.append($createTextNode('Two'));
+        root.append(p1, p2);
+      },
+      {discrete: true},
+    );
+    expect(doc.root.first).toBeDefined();
+    expect(doc.root.first!.next).toBeDefined();
+
+    // Step 2: Add paragraph in the middle
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const pNew = $createParagraphNode();
+        pNew.append($createTextNode('Middle'));
+        const firstChild = root.getFirstChild();
+        if (firstChild) {
+          firstChild.insertAfter(pNew);
+        }
+      },
+      {discrete: true},
+    );
+    expect(doc.root.first).toBeDefined();
+    expect(doc.root.first!.next).toBeDefined();
+    expect(doc.root.first!.next!.next).toBeDefined();
+    const middleText = (
+      doc.root.first!.next!.first!.state.j.get() as SerializedTextNode
+    ).text;
+    expect(middleText).toBe('Middle');
+
+    // Step 3: Remove middle paragraph
+    editor.update(
+      () => {
+        const root = $getRoot();
+        const children = root.getChildren();
+        if (children[1]) {
+          children[1].remove();
+        }
+      },
+      {discrete: true},
+    );
+    expect(doc.root.first).toBeDefined();
+    expect(doc.root.first!.next).toBeDefined();
+    expect(doc.root.first!.next!.next).toBeUndefined();
   });
 });
