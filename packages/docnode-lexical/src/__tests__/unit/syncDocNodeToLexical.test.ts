@@ -1,5 +1,6 @@
 import {
   $getRoot,
+  ParagraphNode,
   type SerializedParagraphNode,
   type SerializedTextNode,
 } from 'lexical';
@@ -91,7 +92,7 @@ describe('docnode to lexical sync', () => {
       const root = $getRoot();
       expect(root.getChildrenSize()).toBe(1);
 
-      const paragraph = root.getFirstChild();
+      const paragraph = root.getFirstChild() as ParagraphNode;
       expect(paragraph?.getType()).toBe('paragraph');
       expect(paragraph?.getChildrenSize()).toBe(1);
 
@@ -161,7 +162,7 @@ describe('docnode to lexical sync', () => {
       const root = $getRoot();
       expect(root.getChildrenSize()).toBe(2);
 
-      const children = root.getChildren();
+      const children = root.getChildren() as ParagraphNode[];
       expect(children[0].getFirstChild()?.getTextContent()).toBe('First');
       expect(children[1].getFirstChild()?.getTextContent()).toBe('Second');
     });
@@ -208,7 +209,7 @@ describe('docnode to lexical sync', () => {
     // Verify initial state
     editor.getEditorState().read(() => {
       const root = $getRoot();
-      const text = root.getFirstChild()?.getFirstChild();
+      const text = (root.getFirstChild() as ParagraphNode)?.getFirstChild();
       expect(text?.getTextContent()).toBe('Initial');
     });
 
@@ -223,7 +224,7 @@ describe('docnode to lexical sync', () => {
     // Verify updated state in Lexical
     editor.getEditorState().read(() => {
       const root = $getRoot();
-      const text = root.getFirstChild()?.getFirstChild();
+      const text = (root.getFirstChild() as ParagraphNode)?.getFirstChild();
       expect(text?.getTextContent()).toBe('Updated');
     });
   });
@@ -297,7 +298,7 @@ describe('docnode to lexical sync', () => {
     editor.getEditorState().read(() => {
       const root = $getRoot();
       expect(root.getChildrenSize()).toBe(1);
-      const text = root.getFirstChild()?.getFirstChild();
+      const text = (root.getFirstChild() as ParagraphNode)?.getFirstChild();
       expect(text?.getTextContent()).toBe('Second');
     });
   });
@@ -379,7 +380,7 @@ describe('docnode to lexical sync', () => {
     editor.getEditorState().read(() => {
       const root = $getRoot();
       expect(root.getChildrenSize()).toBe(3);
-      const children = root.getChildren();
+      const children = root.getChildren() as ParagraphNode[];
       expect(children[1].getFirstChild()?.getTextContent()).toBe('Middle');
     });
 
@@ -390,7 +391,7 @@ describe('docnode to lexical sync', () => {
     editor.getEditorState().read(() => {
       const root = $getRoot();
       expect(root.getChildrenSize()).toBe(2);
-      const children = root.getChildren();
+      const children = root.getChildren() as ParagraphNode[];
       expect(children[0].getFirstChild()?.getTextContent()).toBe('One');
       expect(children[1].getFirstChild()?.getTextContent()).toBe('Two');
     });
