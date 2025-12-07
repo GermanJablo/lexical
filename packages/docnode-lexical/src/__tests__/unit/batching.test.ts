@@ -1,5 +1,3 @@
-/* eslint-disable header/header */
-
 import {$getRoot, createEditor} from 'lexical';
 import {expect, test} from 'vitest';
 

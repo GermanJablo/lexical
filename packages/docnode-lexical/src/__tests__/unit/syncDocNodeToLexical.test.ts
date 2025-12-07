@@ -1,5 +1,3 @@
-/* eslint-disable header/header */
-
 import {
   $getRoot,
   type SerializedParagraphNode,

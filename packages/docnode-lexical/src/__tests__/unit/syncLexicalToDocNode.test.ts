@@ -1,5 +1,3 @@
-/* eslint-disable header/header */
-
 import {Doc, DocNode} from 'docnode';
 import {
   $createParagraphNode,

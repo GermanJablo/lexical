@@ -101,6 +101,16 @@ module.exports = {
       },
     },
     {
+      // Exclude docnode-lexical from header requirement
+      files: [
+        'packages/docnode-lexical/**/*.ts',
+        'packages/docnode-lexical/**/*.tsx',
+      ],
+      rules: {
+        'header/header': OFF,
+      },
+    },
+    {
       files: [
         // These aren't compiled, but they're written in module JS
         'packages/lexical-playground/esm/*.mjs',

@@ -1,5 +1,4 @@
 /* eslint-disable curly */
-/* eslint-disable header/header */
 
 import {defineNode, defineState, Doc, type DocNode} from 'docnode';
 import {
