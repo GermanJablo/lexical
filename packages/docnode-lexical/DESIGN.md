@@ -1,31 +1,20 @@
 # DocNode-Lexical Integration Design Document
 
-## TL;DR - How It Works (Simple Explanation)
+## TL;DR - How It Works
 
 **The Problem:** Keep Lexical editor and DocNode document in sync as user types.
 
-**The Solution:** Bidirectional scanning algorithm (like sorting cards from both ends):
+**The Solution:** Simple DFS with dirty tracking (similar to Lexical's Reconciler):
 
-```
+```typescript
 When user types:
-  1. Check what changed (dirtyElements)
-  2. Compare node lists from LEFT ⬅️ and RIGHT ➡️
-  3. Skip nodes that match on both sides
-  4. Only process the MIDDLE part that's different
-  5. Create/Update/Delete nodes as needed
+  1. Check what changed (dirtyElements + dirtyLeaves)
+  2. Iterate through children in order
+  3. Skip clean nodes (O(1) dirty check)
+  4. For dirty nodes: Update/Create/Delete/Move as needed
 ```
 
-**Example:**
-```
-Before: [A] [B] [C] [D]
-After:  [A] [B] [X] [C] [D]
-                ↑ new!
-
-Process:
-  ⬅️ Skip A, B (match)
-  ➡️ Skip C, D (match)  
-  🔄 Middle: Insert X
-```
+**Key Insight:** Lexical already tells us what's dirty via `dirtyElements` and `dirtyLeaves`. No need for complex bidirectional scanning - just check if each node is dirty before processing.
 
 **Status:** ✅ Lexical → DocNode sync complete (10/10 tests passing)
 
@@ -159,269 +148,107 @@ while (prevIndex <= prevEndIndex && nextIndex <= nextEndIndex) {
 | **Uses dirty check**  | ✅ To skip updates                         | ✅ Passes `dirtyElements`            | ✅ **Uses to skip recursion**         |
 | **Tail handling**     | `$createChildren()` / `destroyChildren()` | Manual loop                         | `yDomFragment.delete()` / `insert()` |
 
-**Key Insights:**
-- **Reconciler & Yjs V1** are structurally nearly identical (V1 likely copied from Reconciler)
-- **Yjs V2** optimizes by scanning from both ends and skipping non-dirty recursions
-- All three handle the same edge cases (moves, creates, removes, updates)
-- **Our DocNode implementation will follow Yjs V2 from the start** - build optimized, not refactor later
 
-#### Code Similarity Examples
+## Implementation Approach: Simple DFS with Dirty Tracking
 
-**Pattern 1: Lazy Set Creation** (identical across Reconciler and Yjs V1)
+### Core Algorithm
 
 ```typescript
-// Reconciler
-if (prevChildrenSet === undefined) {
-  prevChildrenSet = new Set(prevChildren);
-}
-if (nextChildrenSet === undefined) {
-  nextChildrenSet = new Set(nextChildren);
-}
-
-// Yjs V1 - LITERALLY THE SAME CODE
-if (prevChildrenSet === undefined) {
-  prevChildrenSet = new Set(prevChildren);
-}
-if (nextChildrenSet === undefined) {
-  nextChildrenSet = new Set(nextChildren);
-}
-```
-
-**Pattern 2: Move Detection Logic**
-
-```typescript
-// Both use identical logic
-const nextHasPrevKey = nextChildrenSet.has(prevKey);
-const prevHasNextKey = prevChildrenSet.has(nextKey);
-
-if (!nextHasPrevKey) {
-  // Remove prev
-} else if (!prevHasNextKey) {
-  // Create next
-} else {
-  // Move next
-}
-```
-
-**Why this matters:** 
-- We'll adapt Yjs V2's optimized algorithm directly
-- Bidirectional scanning + dirty-checking from day one
-- Built for performance, not retrofitted later
-- Handles all edge cases proven by three battle-tested implementations
-
-## Implementation Approach: Simple DFS with Dirty Checking
-
-**Concept:** Use a straightforward DFS traversal with `dirtyElements` for optimization. The bidirectional scanning from Yjs V2 is unnecessary when we already have granular dirty tracking from Lexical.
-
-### High-Level Flow
-
-```typescript
-editor.registerUpdateListener(({
-  editorState,
-  dirtyElements,
-  tags,
-}) => {
-  // Skip if update came from DocNode (avoid infinite loop)
-  if (tags.has('docnode')) return;
-  
-  // Only sync if root has changes
-  if (!dirtyElements.has('root')) return;
-  
-  editorState.read(() => {
-    const lexicalRoot = $getRoot();
-    $syncLexicalToDocNode(
-      doc,
-      doc.root,
-      lexicalRoot,
-      dirtyElements,
-      lexicalKeyToDocNodeId,
-      docNodeIdToLexicalKey
-    );
-  });
-});
-```
-
-### Simple DFS Algorithm
-
-The core algorithm iterates through Lexical children in order and syncs to DocNode:
-
-```typescript
-function $syncLexicalToDocNode(
-  doc: Doc,
-  docParentNode: DocNode,
-  lexicalNode: ElementNode,
-  dirtyElements: Map<NodeKey, boolean>,
-  lexicalKeyToDocNodeId: Map<string, string>,
-  docNodeIdToLexicalKey: Map<string, string>
-) {
-  const lexicalChildren = lexicalNode.getChildren();
-  
-  // Build map of existing DocNode children for O(1) lookup
+function $syncLexicalToDocNode(doc, docParent, lexicalNode, dirtyElements, dirtyLeaves, ...) {
+  // 1. Build map of existing DocNode children (O(1) lookup)
   const docChildrenMap = new Map();
-  let docChild = docParentNode.first;
+  let docChild = docParent.first;
   while (docChild) {
     docChildrenMap.set(docChild.id, docChild);
     docChild = docChild.next;
   }
   
-  const seenDocNodeIds = new Set();
+  // 2. Process each Lexical child in order
   let prevDocChild;
-  
-  // Process each Lexical child in order
-  for (const lexicalChild of lexicalChildren) {
-    const mappedDocNodeId = lexicalKeyToDocNodeId.get(lexicalChild.getKey());
+  for (const lexicalChild of lexicalNode.getChildren()) {
+    const mappedDocNodeId = map.get(lexicalChild.key);
     
     if (mappedDocNodeId && docChildrenMap.has(mappedDocNodeId)) {
-      // Node exists - update content and position
-      const existingDocNode = docChildrenMap.get(mappedDocNodeId);
+      // EXISTS → Update + maybe move
+      const docNode = docChildrenMap.get(mappedDocNodeId);
+      $syncNodeContent(docNode, lexicalChild, dirtyElements, dirtyLeaves);
       
-      // Update content (with dirty check inside)
-      $syncNodeContent(existingDocNode, lexicalChild, dirtyElements, ...);
-      
-      // Move if needed
-      if (prevDocChild && existingDocNode.prev !== prevDocChild) {
-        existingDocNode.move(prevDocChild, 'after');
-      } else if (!prevDocChild && docParentNode.first !== existingDocNode) {
-        existingDocNode.move(docParentNode.first, 'before');
-      }
-      
-      seenDocNodeIds.add(mappedDocNodeId);
-      prevDocChild = existingDocNode;
+      if (needsMove) docNode.move(prevDocChild, 'after');
+      prevDocChild = docNode;
     } else {
-      // Node doesn't exist - create it
-      const newDocNode = createDocNodeFromLexical(lexicalChild, ...);
-      
-      if (prevDocChild) {
-        prevDocChild.insertAfter(newDocNode);
-      } else {
-        docParentNode.prepend(newDocNode);
-      }
-      
-      seenDocNodeIds.add(newDocNode.id);
-      prevDocChild = newDocNode;
+      // NEW → Create
+      const newNode = createDocNodeFromLexical(lexicalChild, ...);
+      prevDocChild ? prevDocChild.insertAfter(newNode) : docParent.prepend(newNode);
+      prevDocChild = newNode;
     }
   }
   
-  // Delete unused DocNodes
-  for (const [docNodeId, docNode] of docChildrenMap) {
-    if (!seenDocNodeIds.has(docNodeId)) {
-      docNode.delete();
-      // Clean up mappings
-    }
+  // 3. Delete unused DocNodes
+  for (const [id, node] of docChildrenMap) {
+    if (!seen.has(id)) node.delete();
+  }
+}
+
+function $syncNodeContent(docNode, lexicalNode, dirtyElements, dirtyLeaves) {
+  const isDirty = dirtyElements.has(key) || dirtyLeaves.has(key);
+  if (!isDirty) return; // ← Skip clean nodes!
+  
+  docNode.state.j.set(lexicalNode.exportJSON());
+  
+  if ($isElementNode(lexicalNode)) {
+    $syncLexicalToDocNode(doc, docNode, lexicalNode, ...);
   }
 }
 ```
 
-**Why this approach:**
-- ✅ **Simple**: Single pass through children, easy to understand
-- ✅ **Fast**: `dirtyElements` provides the optimization, not bidirectional scanning
-- ✅ **Minimal operations**: Uses DocNode's `.move()` for repositioning
-- ✅ **Correct**: Handles creates, updates, deletes, and moves properly
-- ✅ **Maintainable**: ~60 lines vs ~200 for bidirectional approach
+**Why this works:**
+- ✅ **Dirty tracking** - Skip 99% of nodes that didn't change
+- ✅ **Single pass** - No complex bidirectional scanning needed
+- ✅ **Minimal ops** - Uses `.move()` for repositioning, not delete+create
+- ✅ **~60 lines** - Simple and maintainable
 
-### Complete Example Walkthrough
-
-**Scenario:** User inserts a paragraph in the middle of a document
+### Example: Insert Paragraph in Middle
 
 ```
-Initial:
-  DocNode:  [P1("Hello")] [P2("World")]
-  Lexical:  [P1("Hello")] [P2("World")]
+Before: [P1("Hello")] [P2("World")]
+After:  [P1("Hello")] [P_NEW("Middle")] [P2("World")]
 
-User Action:
-  editor.update(() => {
-    const p1 = root.getFirstChild();
-    const pNew = $createParagraphNode();
-    pNew.append($createTextNode("Middle"));
-    p1.insertAfter(pNew);
-  }, {discrete: true});
+Sync Process:
+  1. P1: exists, not dirty → skip content update
+  2. P_NEW: doesn't exist → create + insert
+  3. P2: exists, wrong position → move after P_NEW
 
-After User Action:
-  DocNode:  [P1("Hello")] [P2("World")]          ← Not updated yet
-  Lexical:  [P1("Hello")] [P_NEW("Middle")] [P2("World")]  ← Changed!
+Operations: 1 create + 1 move
 ```
 
-**Sync Process:**
+### Example: Edit Text
 
 ```
-Step 1: Update Listener Fires (synchronously with discrete: true)
-  dirtyElements = Map { 'root' => true }  ← Root is dirty
-  tags = Set { }  ← No 'docnode' tag, proceed
+Before: [P1(TextNode("Hello"))]
+After:  [P1(TextNode("Hello World!"))]
 
-Step 2: Build DocNode children map
-  docChildrenMap = {
-    docNode_P1.id => DocNode_P1,
-    docNode_P2.id => DocNode_P2
-  }
-  lexicalChildren = [P1, P_NEW, P2]
+dirtyElements: {'root', 'p1'}
+dirtyLeaves: {'text1'}
 
-Step 3: Iterate Lexical children
-  i=0: P1
-    - mappedDocNodeId = docNode_P1.id ✅ exists
-    - Update content (dirty check inside)
-    - Position OK (first child)
-    - prevDocChild = DocNode_P1
+Sync Process:
+  1. P1: dirty (in dirtyElements) → update content
+  2. TextNode: dirty (in dirtyLeaves) → update content
 
-  i=1: P_NEW
-    - mappedDocNodeId = undefined ❌ doesn't exist
-    - Create new DocNode_P_NEW
-    - prevDocChild.insertAfter(DocNode_P_NEW)
-    - prevDocChild = DocNode_P_NEW
-
-  i=2: P2
-    - mappedDocNodeId = docNode_P2.id ✅ exists
-    - Update content
-    - Position wrong! prev !== DocNode_P_NEW
-    - DocNode_P2.move(DocNode_P_NEW, 'after')  ← MOVE operation!
-    - prevDocChild = DocNode_P2
-
-Step 4: Clean up
-  seenDocNodeIds = {docNode_P1.id, docNode_P_NEW.id, docNode_P2.id}
-  All nodes seen → nothing to delete
-
-Result:
-  DocNode:  [P1("Hello")] [P_NEW("Middle")] [P2("World")]  ✅
-  Lexical:  [P1("Hello")] [P_NEW("Middle")] [P2("World")]  ✅
-
-Operations Generated:
-  1. Create DocNode_P_NEW
-  2. Move DocNode_P2 after DocNode_P_NEW
+Operations: 2 updates
 ```
-
-**Key Functions in Action:**
-
-1. **`$syncLexicalToDocNode()`** - Single pass through children
-2. **`$syncNodeContent()`** - Updates content with dirty check
-3. **`createDocNodeFromLexical()`** - Creates new nodes recursively
-4. **DocNode `.move()`** - Efficiently repositions existing nodes
 
 ## Node Mapping Strategy
 
-The mapping between Lexical and DocNode is straightforward: **wrap the entire serialized Lexical node in a single DocNode state property**.
+**Simple:** One universal `LexicalDocNode` type stores any Lexical node's JSON:
 
 ```typescript
 export const LexicalDocNode = defineNode({
-  state: {
-    j: defineState({
-      fromJSON: (json: unknown) =>
-        (json ?? {}) as SerializedLexicalNode & {[key: string]: unknown},
-    }),
-  },
+  state: { j: defineState({ fromJSON: (json) => json ?? {} }) },
   type: 'l',
 });
 ```
 
-**Key Points:**
-- All Lexical nodes are stored as type `'l'` in DocNode
-- The `j` (JSON) property contains the complete `SerializedLexicalNode` including its `type`
-- No need for per-node-type mapping - universal approach
-- Lexical's serialization/deserialization handles all node types
-
-**Advantages:**
-- ✅ Simple: One DocNode type for all Lexical nodes
-- ✅ Forward-compatible: Works with custom Lexical nodes automatically
-- ✅ Complete: Preserves all Lexical node properties
-- ✅ Efficient: Leverages Lexical's existing serialization
+Benefits: Works with all node types, forward-compatible, minimal code.
 
 ## DocNode-Specific Considerations
 
@@ -612,37 +439,32 @@ This leverages Lexical's existing `exportJSON()` and node creation from JSON.
 
 ## References
 
-- [Lexical Reconciler](../lexical/src/LexicalReconciler.ts) - Two-pointer diff algorithm
-- [Yjs V1 Sync](../lexical-yjs/src/CollabElementNode.ts) - Tree diff approach
-- [Yjs V2 Sync](../lexical-yjs/src/SyncV2.ts) - Optimized bidirectional diff
-- [DocNode Documentation](https://docnode.dev/llms-full.txt) - API and lifecycle
-- [Current Implementation](./src/index.ts) - Node mapping definition
+- [Lexical Reconciler](../lexical/src/LexicalReconciler.ts) - Dirty tracking pattern
+- [DocNode Docs](https://docnode.dev/llms-full.txt) - Full API reference
+- [Implementation](./src/index.ts) - Current code
 
 ## Implementation Status
 
 ### ✅ Completed (v1.0)
 
-1. ✅ **Core Synchronization (Lexical → DocNode)**
-   - Bidirectional two-pointer diff algorithm (Yjs V2 style)
-   - Dirty element gating for performance
-   - Left and right scanning optimizations
-   - Middle section reconciliation
-   
-2. ✅ **Node Operations**
-   - Create: New nodes inserted at correct positions
-   - Update: Content changes detected via JSON comparison
-   - Delete: Removed nodes cleaned up with `.delete()`
-   - Move: Handled via create + delete (can be optimized later)
+1. **Core Synchronization (Lexical → DocNode)**
+   - Simple DFS with dirty tracking (`dirtyElements` + `dirtyLeaves`)
+   - Early returns for clean nodes (skip unnecessary work)
+   - Proper move detection (uses `.move()` not delete+create)
 
-3. ✅ **Mapping System**
-   - Universal `LexicalDocNode` with `j` state property
-   - Bidirectional maps: `lexicalKeyToDocNodeId` ↔ `docNodeIdToLexicalKey`
-   - Supports all Lexical node types automatically
+2. **Node Operations**
+   - Create: `createDocNodeFromLexical()` recursively
+   - Update: Only when dirty (auto deep-comparison by DocNode)
+   - Delete: `.delete()` with mapping cleanup
+   - Move: `.move(target, position)` for repositioning
 
-4. ✅ **Tests (10/10 passing)**
-   - Basic operations: add, update, delete
-   - Complex sequences: insert in middle, multiple operations
-   - Edge cases: empty editor, text updates, paragraph removal
+3. **Optimizations**
+   - ✅ Dirty gating (skip 99% of unchanged nodes)
+   - ✅ O(1) lookup via mapping
+   - ✅ No unnecessary stringification
+   - ✅ Minimal DocNode operations
+
+4. **Tests: 10/10 passing** ✅
 
 ### 🔄 In Progress
 
@@ -651,28 +473,9 @@ This leverages Lexical's existing `exportJSON()` and node creation from JSON.
 ### 📋 Next Steps
 
 1. **DocNode → Lexical sync** (reverse direction)
-   - Listen to `doc.onChange()`
-   - Apply DocNode changes to Lexical editor
-   - Tag updates to prevent infinite loops
-
-2. **Selection/Cursor sync**
-   - Sync cursor position between DocNode and Lexical
-   - Handle collaborative selection indicators
-
+2. **Selection/cursor sync**
 3. **Normalized nodes handling**
-   - Process `normalizedNodes` set
-   - Handle text node merging/splitting
-
-4. **Performance optimizations**
-   - Proper move detection (instead of delete+create)
-   - Batch multiple operations
-   - Benchmark against Yjs performance
-
-5. **Production readiness**
-   - Error handling and recovery
-   - Edge case testing
-   - Performance profiling
-   - Documentation
+4. **Production hardening** (error handling, edge cases)
 
 ---
 
