@@ -13,6 +13,7 @@
       "@lexical/devtools-core": [
         "./packages/lexical-devtools-core/src/index.ts"
       ],
+      "@lexical/docnode": ["./packages/docnode-lexical/src/index.ts"],
       "@lexical/dragon": ["./packages/lexical-dragon/src/index.ts"],
       "@lexical/eslint-plugin": [
         "./packages/lexical-eslint-plugin/src/index.ts"

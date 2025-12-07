@@ -1,13 +1,6 @@
 /* eslint-disable header/header */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import {
-  defineNode,
-  defineState,
-  Doc,
-  type DocNode,
-  type JsonDoc,
-  string,
-} from 'docnode';
+
+import {defineNode, defineState, Doc, type DocNode} from 'docnode';
 import {
   $getRoot,
   $isElementNode,
@@ -37,7 +30,7 @@ export function docToLexical(
         parentDocNode: DocNode,
         parentLexicalNode: LexicalNode,
       ) => {
-        parentDocNode.children().forEach((child) => {
+        parentDocNode.children().forEach((child: DocNode) => {
           if (!child.is(LexicalDocNode)) {
             throw new Error('Expected child to be a LexicalDocNode');
           }
@@ -69,7 +62,7 @@ export function docToLexical(
 export const LexicalDocNode = defineNode({
   state: {
     j: defineState({
-      fromJSON: (json) =>
+      fromJSON: (json: unknown) =>
         (json ?? {}) as SerializedLexicalNode & {[key: string]: unknown},
     }),
   },

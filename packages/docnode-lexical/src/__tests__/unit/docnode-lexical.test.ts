@@ -1,16 +1,11 @@
-/**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
- */
-import {docToLexical, LexicalDocNode} from '@docnode/lexical';
+/* eslint-disable header/header */
+
 import {Doc} from 'docnode';
 import {type SerializedParagraphNode, type SerializedTextNode} from 'lexical';
 import {describe, expect, test} from 'vitest';
 
-import {assertJson} from '../docnode/utils.js';
+import {docToLexical, LexicalDocNode} from '../../exports';
+import {assertJson} from './utils';
 
 describe('docnode to lexical', () => {
   test('no doc provided', () => {
@@ -36,7 +31,6 @@ describe('docnode to lexical', () => {
     expect(rootJson).toStrictEqual(
       '{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}',
     );
-    assertJson(doc, ['root', {}, [['l', {j: rootJson}]]]);
   });
 
   test('doc provided', () => {

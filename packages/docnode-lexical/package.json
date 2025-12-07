@@ -1,33 +1,42 @@
 {
-  "name": "@docnode/lexical",
-  "type": "module",
-  "license": "SEE LICENSE IN LICENSE.md",
-  "private": true,
-  "homepage": "https://docnode.dev",
+  "name": "@lexical/docnode",
+  "description": "This package contains the functionality for integrating Lexical with DocNode.",
+  "keywords": [
+    "lexical",
+    "editor",
+    "rich-text",
+    "docnode"
+  ],
+  "license": "MIT",
+  "version": "0.38.2",
+  "main": "LexicalDocNode.js",
+  "types": "index.d.ts",
+  "dependencies": {
+    "docnode": "0.1.1",
+    "lexical": "0.38.2"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/docnode/docnode.git",
+    "url": "https://github.com/facebook/lexical",
     "directory": "packages/docnode-lexical"
   },
-  "files": [
-    "dist",
-    "LICENSE.md",
-    "README.md"
-  ],
-  "scripts": {
-    "dev": "tsc -p tsconfig.build.json --watch",
-    "build": "tsc -p tsconfig.build.json",
-    "clean": "rm -rf node_modules .turbo dist tsconfig.build.tsbuildinfo || rmdir /s /q node_modules .turbo dist tsconfig.build.tsbuildinfo",
-    "typecheck": "tsc --noEmit"
-  },
+  "module": "LexicalDocNode.mjs",
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/src/exports/index.d.ts",
-      "default": "./dist/src/exports/index.js"
+      "import": {
+        "types": "./index.d.ts",
+        "development": "./LexicalDocNode.dev.mjs",
+        "production": "./LexicalDocNode.prod.mjs",
+        "node": "./LexicalDocNode.node.mjs",
+        "default": "./LexicalDocNode.mjs"
+      },
+      "require": {
+        "types": "./index.d.ts",
+        "development": "./LexicalDocNode.dev.js",
+        "production": "./LexicalDocNode.prod.js",
+        "default": "./LexicalDocNode.js"
+      }
     }
-  },
-  "dependencies": {
-    "docnode": "workspace:*",
-    "lexical": "^0.38.2"
   }
 }
