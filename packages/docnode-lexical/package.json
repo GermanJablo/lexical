@@ -1,0 +1,33 @@
+{
+  "name": "@docnode/lexical",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "private": true,
+  "homepage": "https://docnode.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/docnode/docnode.git",
+    "directory": "packages/docnode-lexical"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf node_modules .turbo dist tsconfig.build.tsbuildinfo || rmdir /s /q node_modules .turbo dist tsconfig.build.tsbuildinfo",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/exports/index.d.ts",
+      "default": "./dist/src/exports/index.js"
+    }
+  },
+  "dependencies": {
+    "docnode": "workspace:*",
+    "lexical": "^0.38.2"
+  }
+}
