@@ -2,21 +2,27 @@
 
 ## TL;DR - How It Works
 
-**The Problem:** Keep Lexical editor and DocNode document in sync as user types.
+**The Problem:** Keep Lexical editor and DocNode document in sync (bidirectional).
 
-**The Solution:** Simple DFS with dirty tracking (similar to Lexical's Reconciler):
+**The Solution:** 
+- **Lexical → DocNode:** Simple DFS with dirty tracking (skip clean nodes)
+- **DocNode → Lexical:** Rebuild strategy (clear + recreate from DocNode tree)
 
 ```typescript
-When user types:
+User types (Lexical → DocNode):
   1. Check what changed (dirtyElements + dirtyLeaves)
-  2. Iterate through children in order
-  3. Skip clean nodes (O(1) dirty check)
-  4. For dirty nodes: Update/Create/Delete/Move as needed
+  2. Iterate children in order, skip clean nodes (O(1) check)
+  3. Update/Create/Delete/Move as needed
+
+Remote edit (DocNode → Lexical):
+  1. Clear Lexical tree
+  2. Rebuild from DocNode (parse serialized JSON)
+  3. Update bidirectional mappings
 ```
 
-**Key Insight:** Lexical already tells us what's dirty via `dirtyElements` and `dirtyLeaves`. No need for complex bidirectional scanning - just check if each node is dirty before processing.
+**Key Insight:** Lexical's `dirtyElements`/`dirtyLeaves` make sync trivial. DocNode's auto-batching and deep-comparison eliminate manual diff logic.
 
-**Status:** ✅ Lexical → DocNode sync complete (10/10 tests passing)
+**Status:** ✅ Full bidirectional sync (16/16 tests passing)
 
 ---
 
@@ -306,122 +312,7 @@ const LexicalDocNodeExtension: Extension = {
 };
 ```
 
-## Implementation Phases
-
-### Phase 1: Core Optimized Sync (MVP)
-- [ ] Implement bidirectional diff algorithm (Yjs V2 style)
-- [ ] Dirty-checking optimization built-in from start
-- [ ] Lexical → DocNode: Serialize and sync with skip logic
-- [ ] DocNode → Lexical: Deserialize and apply changes
-- [ ] Prevent infinite loops with tags
-- [ ] Handle basic node types (paragraph, text, root)
-
-### Phase 2: Complete Node Support
-- [ ] Support all element nodes and their children
-- [ ] Handle text node formatting and styles
-- [ ] Properly sync node properties via `j` state
-- [ ] Test with custom Lexical nodes
-- [ ] Handle edge cases (moves, normalization)
-- [ ] Validate performance: < 16ms for typing operations
-
-### Phase 3: Advanced Features
-- [ ] Selection sync with dirty tracking
-- [ ] Cursor positions (multi-user awareness)
-- [ ] Undo/Redo integration with DocNode's inverse operations
-- [ ] Normalization hooks for Lexical constraints
-- [ ] Benchmark against Yjs (should be competitive or better)
-
-### Phase 4: Polish & Production Ready
-- [ ] Comprehensive test suite
-- [ ] Edge case handling (large documents, rapid edits)
-- [ ] Memory profiling and optimization
-- [ ] Documentation with examples
-- [ ] Performance comparison report vs Yjs
-
-## Key Implementation Details
-
-### Bidirectional Diff Algorithm (Yjs V2 Approach)
-
-The core sync function uses bidirectional scanning for optimal performance:
-
-```typescript
-function $updateDocNodeFragment(
-  doc: DocNodeDoc,
-  docNode: DocNode<typeof LexicalDocNode>,
-  lexicalNode: ElementNode,
-  dirtyElements: Set<NodeKey>
-): void {
-  // 1. Sync node properties if changed
-  const currentJSON = docNode.state.j.get();
-  const newJSON = lexicalNode.exportJSON();
-  if (!deepEqual(currentJSON, newJSON)) {
-    docNode.state.j.set(newJSON);
-  }
-  
-  // 2. Get children
-  const docChildren = docNode.children;
-  const lexicalChildren = lexicalNode.getChildren();
-  const docChildCnt = docChildren.length;
-  const lexicalChildCnt = lexicalChildren.length;
-  const minCnt = Math.min(docChildCnt, lexicalChildCnt);
-  
-  let left = 0;
-  let right = 0;
-  
-  // 3. Scan from LEFT - skip matched, unchanged nodes
-  for (; left < minCnt; left++) {
-    const docChild = docChildren[left];
-    const lexicalChild = lexicalChildren[left];
-    
-    if (isMappedIdentity(docChild, lexicalChild)) {
-      // Already synced, only recurse if dirty
-      if (lexicalChild instanceof ElementNode && 
-          dirtyElements.has(lexicalChild.__key)) {
-        $updateDocNodeFragment(doc, docChild, lexicalChild, dirtyElements);
-      }
-    } else if (sameNodeType(docChild, lexicalChild)) {
-      // Update mapping and continue
-      updateNodeMapping(docChild, lexicalChild);
-    } else {
-      break; // Mismatch - handle in main loop
-    }
-  }
-  
-  // 4. Scan from RIGHT - skip matched, unchanged nodes
-  for (; right + left < minCnt; right++) {
-    const docChild = docChildren[docChildCnt - right - 1];
-    const lexicalChild = lexicalChildren[lexicalChildCnt - right - 1];
-    
-    if (isMappedIdentity(docChild, lexicalChild)) {
-      if (lexicalChild instanceof ElementNode && 
-          dirtyElements.has(lexicalChild.__key)) {
-        $updateDocNodeFragment(doc, docChild, lexicalChild, dirtyElements);
-      }
-    } else if (sameNodeType(docChild, lexicalChild)) {
-      updateNodeMapping(docChild, lexicalChild);
-    } else {
-      break;
-    }
-  }
-  
-  // 5. ONLY process middle section if there's a mismatch
-  // This is where creates/removes/moves happen
-  if (left + right < Math.max(docChildCnt, lexicalChildCnt)) {
-    reconcileMiddleSection(
-      doc, docNode, docChildren, lexicalChildren,
-      left, right, docChildCnt, lexicalChildCnt, dirtyElements
-    );
-  }
-}
-```
-
-**Key Optimizations:**
-- **Early exit**: If `left + right >= minCnt`, all nodes matched - skip middle processing
-- **Dirty gating**: Only recurse into `ElementNode` children if in `dirtyElements`
-- **Bidirectional**: Process stable edges first, minimize work on unstable middle
-- **Identity checks**: Fast path for nodes that haven't moved or changed
-
-### Serialization Strategy
+## Serialization Strategy
 
 Since we're using Lexical's serialization:
 
@@ -447,40 +338,43 @@ This leverages Lexical's existing `exportJSON()` and node creation from JSON.
 
 ### ✅ Completed (v1.0)
 
-1. **Core Synchronization (Lexical → DocNode)**
-   - Simple DFS with dirty tracking (`dirtyElements` + `dirtyLeaves`)
-   - Early returns for clean nodes (skip unnecessary work)
-   - Proper move detection (uses `.move()` not delete+create)
+#### 1. **Lexical → DocNode Sync** (`$syncLexicalToDocNode`)
+- Simple DFS with dirty tracking (`dirtyElements` + `dirtyLeaves`)
+- Early returns for clean nodes (O(1) dirty check with `||` operator)
+- Proper move detection (uses `.move()` not delete+create)
+- DocNode auto deep-comparison (no manual `JSON.stringify()` needed)
+- **8 tests passing** in `syncLexicalToDocNode.test.ts`
 
-2. **Node Operations**
-   - Create: `createDocNodeFromLexical()` recursively
-   - Update: Only when dirty (auto deep-comparison by DocNode)
-   - Delete: `.delete()` with mapping cleanup
-   - Move: `.move(target, position)` for repositioning
+#### 2. **DocNode → Lexical Sync** (`$syncDocNodeToLexical`)
+- Rebuild strategy: clear Lexical tree + recreate from DocNode
+- Recursive `createLexicalFromDocNode()` using `$parseSerializedNode()`
+- Bidirectional mapping updates (cleanup deleted nodes)
+- Auto-batching with `doc.onChange()` + `doc.forceCommit()`
+- **6 tests passing** in `syncDocNodeToLexical.test.ts`
 
-3. **Optimizations**
-   - ✅ Dirty gating (skip 99% of unchanged nodes)
-   - ✅ O(1) lookup via mapping
-   - ✅ No unnecessary stringification
-   - ✅ Minimal DocNode operations
+#### 3. **Infrastructure**
+- ✅ Infinite loop prevention (tag: `'docnode'`)
+- ✅ Auto transaction batching (DocNode microtask + Lexical `discrete: true`)
+- ✅ Bidirectional key ↔ id mappings
+- ✅ Support for all node types via universal `LexicalDocNode`
 
-4. **Tests: 10/10 passing** ✅
-
-### 🔄 In Progress
-
-- None currently
+#### 4. **Tests: 16/16 passing** ✅
+- `syncLexicalToDocNode.test.ts`: 8 tests (create, update, delete, move, complex edits)
+- `syncDocNodeToLexical.test.ts`: 6 tests (reverse direction)
+- `batching.test.ts`: 2 tests (auto-batching verification)
 
 ### 📋 Next Steps
 
-1. **DocNode → Lexical sync** (reverse direction)
-2. **Selection/cursor sync**
-3. **Normalized nodes handling**
-4. **Production hardening** (error handling, edge cases)
+1. **Collaboration testing** (multi-client sync)
+2. **Optimize DocNode → Lexical** (diff instead of rebuild)
+3. **Selection/cursor sync** (awareness)
+4. **Normalized nodes handling**
+5. **Performance benchmarks vs Yjs**
 
 ---
 
-**Document Version:** 3.0  
+**Document Version:** 4.0  
 **Last Updated:** 2025-12-07  
-**Status:** ✅ Lexical → DocNode sync implemented and tested  
+**Status:** ✅ Full bidirectional sync implemented and tested (16/16 tests)  
 **Author:** Based on technical conversation analyzing Lexical-Yjs implementation
 

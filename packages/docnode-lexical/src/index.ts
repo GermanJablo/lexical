@@ -88,6 +88,21 @@ export function docToLexical(
     },
   );
 
+  // Sync DocNode → Lexical
+  doc.onChange(() => {
+    editor.update(
+      () => {
+        $syncDocNodeToLexical(
+          doc,
+          editor,
+          lexicalKeyToDocNodeId,
+          docNodeIdToLexicalKey,
+        );
+      },
+      {discrete: true, tag: 'docnode'},
+    );
+  });
+
   return {doc, editor};
 }
 
@@ -100,6 +115,77 @@ export const LexicalDocNode = defineNode({
   },
   type: 'l',
 });
+
+/**
+ * Sync DocNode changes to Lexical
+ * For now, uses a simple rebuild strategy - rebuild the entire tree
+ * TODO: Optimize to only update changed nodes using diff algorithm
+ */
+function $syncDocNodeToLexical(
+  doc: Doc,
+  editor: LexicalEditor,
+  lexicalKeyToDocNodeId: Map<string, string>,
+  docNodeIdToLexicalKey: Map<string, string>,
+): void {
+  const lexicalRoot = $getRoot();
+
+  // Clear existing mappings for deleted nodes
+  const existingDocNodeIds = new Set<string>();
+  let docChild = doc.root.first;
+  while (docChild) {
+    existingDocNodeIds.add(docChild.id);
+    docChild = docChild.next;
+  }
+
+  // Remove mappings for deleted DocNodes
+  for (const [docNodeId, lexicalKey] of docNodeIdToLexicalKey) {
+    if (!existingDocNodeIds.has(docNodeId)) {
+      lexicalKeyToDocNodeId.delete(lexicalKey);
+      docNodeIdToLexicalKey.delete(docNodeId);
+    }
+  }
+
+  // Rebuild strategy: clear and recreate
+  lexicalRoot.clear();
+
+  // Recursively create Lexical nodes from DocNode
+  const createLexicalFromDocNode = (
+    docNode: DocNode<typeof LexicalDocNode>,
+  ): LexicalNode => {
+    const serialized = docNode.state.j.get();
+    const lexicalNode = $parseSerializedNode(serialized);
+
+    // Update mappings
+    lexicalKeyToDocNodeId.set(lexicalNode.getKey(), docNode.id);
+    docNodeIdToLexicalKey.set(docNode.id, lexicalNode.getKey());
+
+    // Recursively process children
+    if ($isElementNode(lexicalNode)) {
+      let child = docNode.first;
+      while (child) {
+        if (!child.is(LexicalDocNode)) {
+          throw new Error('Expected child to be a LexicalDocNode');
+        }
+        const lexicalChild = createLexicalFromDocNode(child);
+        lexicalNode.append(lexicalChild);
+        child = child.next;
+      }
+    }
+
+    return lexicalNode;
+  };
+
+  // Process all root children
+  let docChild2 = doc.root.first;
+  while (docChild2) {
+    if (!docChild2.is(LexicalDocNode)) {
+      throw new Error('Expected child to be a LexicalDocNode');
+    }
+    const lexicalNode = createLexicalFromDocNode(docChild2);
+    lexicalRoot.append(lexicalNode);
+    docChild2 = docChild2.next;
+  }
+}
 
 /**
  * Sync Lexical node tree to DocNode using simple DFS with dirty checking
@@ -209,7 +295,7 @@ function $syncLexicalToDocNode(
  */
 function $syncNodeContent(
   doc: Doc,
-  docNode: DocNode<typeof LexicalDocNode>,
+  docNode: DocNode,
   lexicalNode: LexicalNode,
   dirtyElements: Map<NodeKey, boolean>,
   dirtyLeaves: Set<NodeKey>,
@@ -217,7 +303,7 @@ function $syncNodeContent(
   docNodeIdToLexicalKey: Map<string, string>,
 ): void {
   const lexicalKey = lexicalNode.getKey();
-  const isDirty = dirtyElements.has(lexicalKey) ?? dirtyLeaves.has(lexicalKey);
+  const isDirty = dirtyElements.has(lexicalKey) || dirtyLeaves.has(lexicalKey);
 
   if (!isDirty) return;
 
@@ -227,7 +313,7 @@ function $syncNodeContent(
   // I think this is unnecessary because docnode already does a deep comparison when setting the state.
   // Deep comparison only when dirty (like Yjs V1 does with prevValue !== nextValue)
   // if (JSON.stringify(currentJSON) !== JSON.stringify(serialized)) {
-  docNode.state.j.set(serialized);
+  (docNode as DocNode<typeof LexicalDocNode>).state.j.set(serialized);
   // }
 
   // Recurse into children if element

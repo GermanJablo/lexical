@@ -1,12 +1,14 @@
 /* eslint-disable header/header */
 
-import {Doc} from 'docnode';
+import {Doc, DocNode} from 'docnode';
 import {
   $createParagraphNode,
   $createTextNode,
   $getRoot,
+  ElementNode,
   type SerializedParagraphNode,
   type SerializedTextNode,
+  TextNode,
 } from 'lexical';
 import {describe, expect, test} from 'vitest';
 
@@ -74,6 +76,7 @@ describe('docnode to lexical', () => {
     dnParagraph1.append(dnText1);
     dnParagraph2.append(dnText2);
     doc.root.append(dnParagraph1, dnParagraph2);
+    doc.forceCommit(); // Commit before creating editor to avoid transaction error
 
     assertJson(doc, [
       'root',
@@ -151,7 +154,7 @@ describe('lexical to docnode sync', () => {
     expect(doc.root.first).toBeDefined();
     const docChild = doc.root.first!;
     expect(docChild.is(LexicalDocNode)).toBe(true);
-    const json = docChild.state.j.get();
+    const json = (docChild as DocNode<typeof LexicalDocNode>).state.j.get();
     expect(json.type).toBe('paragraph');
   });
 
@@ -177,14 +180,14 @@ describe('lexical to docnode sync', () => {
 
     // Verify structure in DocNode
     expect(doc.root.first).toBeDefined();
-    const docParagraph = doc.root.first!;
+    const docParagraph = doc.root.first as DocNode<typeof LexicalDocNode>;
     expect(docParagraph.is(LexicalDocNode)).toBe(true);
 
     const paragraphJson = docParagraph.state.j.get();
     expect(paragraphJson.type).toBe('paragraph');
 
     // Check text node
-    const docText = docParagraph.first!;
+    const docText = docParagraph.first as DocNode<typeof LexicalDocNode>;
     expect(docText.is(LexicalDocNode)).toBe(true);
     const textJson = docText.state.j.get();
     expect(textJson.type).toBe('text');
@@ -221,11 +224,13 @@ describe('lexical to docnode sync', () => {
     expect(doc.root.first!.next).toBeDefined();
 
     const docP1 = doc.root.first!;
-    const text1 = (docP1.first!.state.j.get() as SerializedTextNode).text;
+    const text1 = (docP1.first as DocNode<typeof LexicalDocNode>).state.j.get()
+      .text;
     expect(text1).toBe('First');
 
     const docP2 = docP1.next!;
-    const text2 = (docP2.first!.state.j.get() as SerializedTextNode).text;
+    const text2 = (docP2.first as DocNode<typeof LexicalDocNode>).state.j.get()
+      .text;
     expect(text2).toBe('Second');
   });
 
@@ -250,15 +255,15 @@ describe('lexical to docnode sync', () => {
     );
 
     // Verify initial state
-    const docText1 = doc.root.first!.first!;
-    expect((docText1.state.j.get() as SerializedTextNode).text).toBe('Initial');
+    const docText1 = doc.root.first!.first as DocNode<typeof LexicalDocNode>;
+    expect(docText1.state.j.get().text).toBe('Initial');
 
     // Update the text
     editor.update(
       () => {
         const root = $getRoot();
-        const paragraph = root.getFirstChild();
-        const text = paragraph?.getFirstChild();
+        const paragraph = root.getFirstChild() as ElementNode;
+        const text = paragraph?.getFirstChild() as TextNode;
         if (text) {
           text.getWritable().setTextContent('Updated');
         }
@@ -267,11 +272,11 @@ describe('lexical to docnode sync', () => {
     );
 
     // Verify updated state
-    const docText2 = doc.root.first!.first!;
-    expect((docText2.state.j.get() as SerializedTextNode).text).toBe('Updated');
+    const docText2 = doc.root.first!.first as DocNode<typeof LexicalDocNode>;
+    expect(docText2.state.j.get().text).toBe('Updated');
   });
 
-  test('remove paragraph', async () => {
+  test('remove paragraph', () => {
     const {editor, doc} = docToLexical({
       namespace: 'MyEditor',
       onError: (error) => {
@@ -280,40 +285,36 @@ describe('lexical to docnode sync', () => {
     });
 
     // Add two paragraphs
-    await new Promise<void>((resolve) => {
-      editor.update(() => {
+    editor.update(
+      () => {
         const root = $getRoot();
         const p1 = $createParagraphNode();
         p1.append($createTextNode('First'));
         const p2 = $createParagraphNode();
         p2.append($createTextNode('Second'));
         root.append(p1, p2);
-      });
-      queueMicrotask(() => {
-        queueMicrotask(resolve);
-      });
-    });
+      },
+      {discrete: true},
+    );
 
     expect(doc.root.first).toBeDefined();
     expect(doc.root.first!.next).toBeDefined();
 
     // Remove first paragraph
-    await new Promise<void>((resolve) => {
-      editor.update(() => {
+    editor.update(
+      () => {
         const root = $getRoot();
         const first = root.getFirstChild();
         first?.remove();
-      });
-      queueMicrotask(() => {
-        queueMicrotask(resolve);
-      });
-    });
+      },
+      {discrete: true},
+    );
 
     // Verify only second paragraph remains
     expect(doc.root.first).toBeDefined();
     expect(doc.root.first!.next).toBeUndefined();
-    const remaining = doc.root.first!.first!;
-    expect((remaining.state.j.get() as SerializedTextNode).text).toBe('Second');
+    const remaining = doc.root.first!.first as DocNode<typeof LexicalDocNode>;
+    expect(remaining.state.j.get().text).toBe('Second');
   });
 
   test('complex edit sequence', () => {
@@ -356,8 +357,8 @@ describe('lexical to docnode sync', () => {
     expect(doc.root.first!.next).toBeDefined();
     expect(doc.root.first!.next!.next).toBeDefined();
     const middleText = (
-      doc.root.first!.next!.first!.state.j.get() as SerializedTextNode
-    ).text;
+      doc.root.first!.next!.first as DocNode<typeof LexicalDocNode>
+    ).state.j.get().text;
     expect(middleText).toBe('Middle');
 
     // Step 3: Remove middle paragraph
