@@ -107,6 +107,7 @@ module.exports = {
         'packages/docnode-lexical/**/*.tsx',
       ],
       rules: {
+        '@lexical/internal/no-optional-chaining': OFF,
         'header/header': OFF,
       },
     },
