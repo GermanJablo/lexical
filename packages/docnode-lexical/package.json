@@ -9,8 +9,8 @@
   ],
   "license": "MIT",
   "version": "0.38.2",
-  "main": "LexicalDocNode.js",
-  "types": "index.d.ts",
+  "main": "dist/LexicalDocnode.js",
+  "types": "dist/index.d.ts",
   "dependencies": {
     "docnode": "0.1.1",
     "lexical": "0.38.2"
@@ -20,22 +20,17 @@
     "url": "https://github.com/facebook/lexical",
     "directory": "packages/docnode-lexical"
   },
-  "module": "LexicalDocNode.mjs",
+  "module": "dist/LexicalDocnode.mjs",
   "sideEffects": false,
   "exports": {
     ".": {
       "import": {
-        "types": "./index.d.ts",
-        "development": "./LexicalDocNode.dev.mjs",
-        "production": "./LexicalDocNode.prod.mjs",
-        "node": "./LexicalDocNode.node.mjs",
-        "default": "./LexicalDocNode.mjs"
+        "types": "./dist/index.d.ts",
+        "default": "./dist/LexicalDocnode.mjs"
       },
       "require": {
-        "types": "./index.d.ts",
-        "development": "./LexicalDocNode.dev.js",
-        "production": "./LexicalDocNode.prod.js",
-        "default": "./LexicalDocNode.js"
+        "types": "./dist/index.d.ts",
+        "default": "./dist/LexicalDocnode.js"
       }
     }
   }

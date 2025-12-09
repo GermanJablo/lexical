@@ -7,6 +7,7 @@ import {
   $parseSerializedNode,
   createEditor,
   type CreateEditorArgs,
+  isLexicalEditor,
   type LexicalEditor,
   type LexicalNode,
   type SerializedLexicalNode,
@@ -15,15 +16,23 @@ import {
 import {syncDocNodeToLexical} from './syncDocNodeToLexical';
 import {syncLexicalToDocNode} from './syncLexicalToDocNode';
 
+/**
+ *
+ * @param editorOrConfig - A Lexical editor instance or a CreateEditorArgs object.
+ * @param doc - A DocNode document instance. If no doc is provided, it will create a new one.
+ * @returns A Lexical editor and DocNode document instance.
+ */
 export function docToLexical(
-  config: CreateEditorArgs,
-  // If no doc is provided, it will create a new one.
+  editorOrConfig: LexicalEditor | CreateEditorArgs,
   doc = new Doc({extensions: [{nodes: [LexicalDocNode]}]}),
 ): {editor: LexicalEditor; doc: Doc} {
   const lexicalKeyToDocNodeId = new Map<string, string>();
   const docNodeIdToLexicalKey = new Map<string, string>();
 
-  const editor = createEditor(config);
+  const editor = isLexicalEditor(editorOrConfig)
+    ? editorOrConfig
+    : createEditor(editorOrConfig);
+
   editor.update(
     () => {
       const root = $getRoot();

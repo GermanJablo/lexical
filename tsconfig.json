@@ -78,6 +78,9 @@
       "@lexical/react/LexicalComposerContext": [
         "./packages/lexical-react/src/LexicalComposerContext.ts"
       ],
+      "@lexical/react/DocNodeCollabPlugin": [
+        "./packages/lexical-react/src/DocNodeCollabPlugin.tsx"
+      ],
       "@lexical/react/LexicalContentEditable": [
         "./packages/lexical-react/src/LexicalContentEditable.tsx"
       ],
@@ -196,6 +199,7 @@
       "@lexical/text": ["./packages/lexical-text/src/index.ts"],
       "@lexical/utils": ["./packages/lexical-utils/src/index.ts"],
       "@lexical/yjs": ["./packages/lexical-yjs/src/index.ts"],
+      "@lexical/docnode": ["./packages/docnode-lexical/src/exports/index.ts"],
       "shared/canUseDOM": ["./packages/shared/src/canUseDOM.ts"],
       "shared/caretFromPoint": ["./packages/shared/src/caretFromPoint.ts"],
       "shared/devInvariant": ["./packages/shared/src/devInvariant.ts"],
@@ -260,6 +264,7 @@
       "@lexical/text/src": ["./packages/lexical-text/src"],
       "@lexical/utils/src": ["./packages/lexical-utils/src"],
       "@lexical/yjs/src": ["./packages/lexical-yjs/src"],
+      "@lexical/docnode/src": ["./packages/docnode-lexical/src"],
       "shared/src": ["./packages/shared/src"]
     }
   },
