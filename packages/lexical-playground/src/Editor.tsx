@@ -33,7 +33,12 @@ import {TablePlugin} from '@lexical/react/LexicalTablePlugin';
 import {useLexicalEditable} from '@lexical/react/useLexicalEditable';
 import {CAN_USE_DOM} from '@lexical/utils';
 import {CONNECTED_COMMAND, TOGGLE_CONNECT_COMMAND} from '@lexical/yjs';
-import {COMMAND_PRIORITY_EDITOR} from 'lexical';
+import {
+  $createParagraphNode,
+  $getRoot,
+  $getSelection,
+  COMMAND_PRIORITY_EDITOR,
+} from 'lexical';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Doc} from 'yjs';
 
@@ -386,6 +391,28 @@ function CollabDocNode({
 
     // Initialize docToLexical binding first
     docToLexical(editor, doc);
+
+    // Set up bootstrap callback - called after sync message is received
+    newProvider.onSynced = (hadHistory) => {
+      // If no history from server and should bootstrap, initialize editor
+      if (!hadHistory && shouldBootstrap) {
+        editor.update(() => {
+          const root = $getRoot();
+          if (root.isEmpty()) {
+            const paragraph = $createParagraphNode();
+            root.append(paragraph);
+            const {activeElement} = document;
+            if (
+              $getSelection() !== null ||
+              (activeElement !== null &&
+                activeElement === editor.getRootElement())
+            ) {
+              paragraph.select();
+            }
+          }
+        });
+      }
+    };
 
     // Connect to WebSocket server and dispatch command
     newProvider.connect();

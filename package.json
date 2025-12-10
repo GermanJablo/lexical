@@ -35,7 +35,7 @@
     "tsc-extension": "npm run compile -w @lexical/devtools",
     "tsc-watch": "tsc -w",
     "collab": "cross-env HOST=localhost PORT=1234 npx y-websocket-server",
-    "collab-docnode": "cross-env HOST=localhost PORT=1235 node packages/lexical-playground/src/docnode-server.mjs",
+    "collab-docnode": "HOST=localhost PORT=1235 node packages/lexical-playground/src/docnode-server.mjs",
     "validation": "npx ts-node --cwdMode packages/lexical-playground/src/server/validation.ts",
     "vitest": "vitest",
     "test-unit": "vitest --no-watch",

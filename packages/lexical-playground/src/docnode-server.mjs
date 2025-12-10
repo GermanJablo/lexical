@@ -10,59 +10,65 @@ import {WebSocketServer} from 'ws';
 const PORT = process.env.PORT || 1235;
 const HOST = process.env.HOST || 'localhost';
 
-// Store full operation history (received from clients)
-const operationHistory = [];
+// Store documents per room: roomId -> {operations: [], clients: Set<WebSocket>}
+const rooms = new Map();
 
-// Store clients: Set<WebSocket>
-const clients = new Set();
-
-console.log('DocNode server initialized (no initial state)');
+function getRoom(roomId) {
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, {
+      clients: new Set(),
+      operations: [],
+    });
+  }
+  return rooms.get(roomId);
+}
 
 const wss = new WebSocketServer({
   host: HOST,
   port: PORT,
 });
 
-console.log(`DocNode WebSocket server running on ws://${HOST}:${PORT}`);
+// Increase max listeners for development (HMR may cause multiple reloads)
+wss.setMaxListeners(20);
 
-wss.on('connection', (ws) => {
-  clients.add(ws);
+wss.on('connection', (ws, req) => {
+  const url = new URL(req.url, `ws://${HOST}:${PORT}`);
+  const roomId = url.pathname.slice(1); // Remove leading '/'
 
-  console.log('Client connected', {
-    clientCount: clients.size,
-    operationHistoryLength: operationHistory.length,
-  });
+  if (!roomId) {
+    ws.close(1008, 'Room ID is required');
+    return;
+  }
+
+  const room = getRoom(roomId);
+  room.clients.add(ws);
 
   // Send full operation history to the new client
   ws.send(
     JSON.stringify({
-      operations: operationHistory,
+      operations: room.operations,
       type: 'sync',
     }),
   );
-
-  console.log(`Sent to client ${operationHistory.length} operations`);
 
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
 
       if (message.type === 'operation') {
-        // Store operation in history
-        operationHistory.push(message.operation);
+        // Store operation in room history
+        room.operations.push(message.operation);
 
-        // Broadcast to ALL other clients (exclude sender)
+        // Broadcast to ALL other clients in the room (exclude sender)
         const broadcastMessage = JSON.stringify({
           clientId: message.clientId,
           operation: message.operation,
           type: 'operation',
         });
 
-        let broadcastCount = 0;
-        clients.forEach((client) => {
+        room.clients.forEach((client) => {
           if (client !== ws && client.readyState === 1) {
             client.send(broadcastMessage);
-            broadcastCount++;
           }
         });
       }
@@ -72,8 +78,12 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log('Client disconnected');
-    clients.delete(ws);
+    room.clients.delete(ws);
+
+    // Clean up empty rooms
+    if (room.clients.size === 0) {
+      rooms.delete(roomId);
+    }
   });
 
   ws.on('error', (error) => {
@@ -85,9 +95,22 @@ wss.on('error', (error) => {
   console.error('WebSocketServer error:', error);
 });
 
-process.on('SIGINT', () => {
+// Use .once() to prevent multiple registrations during HMR
+process.once('SIGINT', () => {
+  // eslint-disable-next-line no-console
   console.log('\nShutting down DocNode WebSocket server...');
   wss.close(() => {
+    // eslint-disable-next-line no-console
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.once('SIGTERM', () => {
+  // eslint-disable-next-line no-console
+  console.log('\nShutting down DocNode WebSocket server...');
+  wss.close(() => {
+    // eslint-disable-next-line no-console
     console.log('Server closed');
     process.exit(0);
   });

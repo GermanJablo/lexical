@@ -35,6 +35,7 @@ export interface DocNodeProvider {
   disconnect: () => void;
   destroy: () => void;
   isConnected: boolean;
+  onSynced?: (hadHistory: boolean) => void;
 }
 
 export function createDocNodeWebsocketProvider(id: string): DocNodeProvider {
@@ -100,6 +101,12 @@ export function createDocNodeWebsocketProviderWithDoc(
         isConnected = true;
         provider.isConnected = true;
 
+        // eslint-disable-next-line no-console
+        console.log('✅ Connected to DocNode WebSocket server', {
+          roomId,
+          wsUrl,
+        });
+
         if (reconnectTimeout) {
           clearTimeout(reconnectTimeout);
           reconnectTimeout = null;
@@ -148,14 +155,25 @@ export function createDocNodeWebsocketProviderWithDoc(
           };
 
           if (message.type === 'sync') {
-            const hasHistory =
-              message.operations && message.operations.length > 0;
+            const hasHistory = Boolean(
+              message.operations && message.operations.length > 0,
+            );
 
-            if (hasHistory) {
+            if (hasHistory && message.operations) {
               for (const operations of message.operations) {
                 operationQueue.push(operations);
               }
               queueMicrotask(processOperationQueue);
+            }
+
+            // Call onSynced callback after processing sync message
+            if (provider.onSynced) {
+              // Wait for operations to be applied before calling onSynced
+              queueMicrotask(() => {
+                if (provider.onSynced) {
+                  provider.onSynced(hasHistory);
+                }
+              });
             }
           } else if (message.type === 'operation' && message.operation) {
             // Skip operations from self
