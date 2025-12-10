@@ -6,15 +6,22 @@ import {useEffect} from 'react';
 
 import {useLexicalComposerContext} from './LexicalComposerContext';
 
-export function DocNodeCollabPlugin({onInit}: {onInit: (doc: Doc) => void}) {
+export function DocNodeCollabPlugin({
+  onInit,
+  // TODO: why cursor added providedDoc?
+  doc: providedDoc,
+}: {
+  onInit: (doc: Doc) => void;
+  doc?: Doc;
+}) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
     if (editor) {
-      const {doc} = docToLexical(editor);
+      const {doc} = docToLexical(editor, providedDoc);
       onInit(doc);
     }
-  }, [editor, onInit]);
+  }, [editor, onInit, providedDoc]);
 
   return null;
 }

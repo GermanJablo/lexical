@@ -5,6 +5,7 @@ import {
   $getRoot,
   $isElementNode,
   $parseSerializedNode,
+  COLLABORATION_TAG,
   createEditor,
   type CreateEditorArgs,
   isLexicalEditor,
@@ -24,7 +25,11 @@ import {syncLexicalToDocNode} from './syncLexicalToDocNode';
  */
 export function docToLexical(
   editorOrConfig: LexicalEditor | CreateEditorArgs,
-  doc = new Doc({extensions: [{nodes: [LexicalDocNode]}]}),
+  doc = Doc.fromJSON({extensions: [{nodes: [LexicalDocNode]}]}, [
+    '01kc52hq510g6y44jhq0wqrjb3',
+    'root',
+    {},
+  ]),
 ): {editor: LexicalEditor; doc: Doc} {
   const lexicalKeyToDocNodeId = new Map<string, string>();
   const docNodeIdToLexicalKey = new Map<string, string>();
@@ -65,7 +70,7 @@ export function docToLexical(
 
       processChildren(doc.root, root);
     },
-    {discrete: true},
+    {discrete: true, tag: COLLABORATION_TAG},
   );
 
   syncLexicalToDocNode(

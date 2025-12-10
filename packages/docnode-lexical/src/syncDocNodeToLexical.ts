@@ -4,6 +4,7 @@ import {
   $getRoot,
   $isElementNode,
   $parseSerializedNode,
+  COLLABORATION_TAG,
   type LexicalEditor,
   type LexicalNode,
   type NodeKey,
@@ -11,6 +12,10 @@ import {
 } from 'lexical';
 
 import {LexicalDocNode} from '.';
+import {
+  getIsApplyingOwnChanges,
+  setIsApplyingOwnChanges,
+} from './syncLexicalToDocNode';
 
 export function syncDocNodeToLexical(
   doc: Doc,
@@ -20,17 +25,36 @@ export function syncDocNodeToLexical(
 ) {
   // Sync DocNode → Lexical using operations
   doc.onChange(({operations}) => {
-    editor.update(
-      () => {
-        $applyDocNodeOperations(
-          doc,
-          operations,
-          lexicalKeyToDocNodeId,
-          docNodeIdToLexicalKey,
-        );
-      },
-      {discrete: true, tag: 'docnode'},
-    );
+    // Skip if this editor is currently applying its own changes to Doc
+    // This prevents reapplying changes when using a shared Doc
+    if (getIsApplyingOwnChanges(editor)) {
+      return;
+    }
+
+    // Mark that we're applying remote changes to prevent loops
+    setIsApplyingOwnChanges(editor, true);
+
+    try {
+      editor.update(
+        () => {
+          $applyDocNodeOperations(
+            doc,
+            operations,
+            lexicalKeyToDocNodeId,
+            docNodeIdToLexicalKey,
+          );
+        },
+        {
+          discrete: true,
+          skipTransforms: true,
+          // Use COLLABORATION_TAG to prevent DOM selection updates when editor is not focused
+          tag: COLLABORATION_TAG,
+        },
+      );
+    } finally {
+      // Reset flag after update completes (including any triggered updates)
+      setIsApplyingOwnChanges(editor, false);
+    }
   });
 }
 

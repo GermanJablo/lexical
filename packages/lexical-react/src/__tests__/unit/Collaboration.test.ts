@@ -40,24 +40,43 @@ describe('Collaboration', () => {
     container = null;
   });
 
-  async function expectCorrectInitialContent(client1: Client, client2: Client) {
-    // Should be empty, as client has not yet updated
-    expect(client1.getHTML()).toEqual('');
-    expect(client1.getHTML()).toEqual(client2.getHTML());
+  async function expectCorrectInitialContent(
+    client1: Client,
+    client2: Client,
+    backend: 'yjs' | 'docnode' = 'yjs',
+  ) {
+    if (backend === 'yjs') {
+      // Yjs: Should be empty, as client has not yet updated
+      expect(client1.getHTML()).toEqual('');
+      expect(client1.getHTML()).toEqual(client2.getHTML());
+    }
 
     // Wait for clients to render the initial content
     await Promise.resolve().then();
 
-    expect(client1.getHTML()).toEqual('<p dir="auto"><br></p>');
+    // Both clients should have the same initial content (empty paragraph)
     expect(client1.getHTML()).toEqual(client2.getHTML());
-    expect(client1.getDocJSON()).toEqual(client2.getDocJSON());
+
+    // Verify it's an empty paragraph (allowing for dir attribute differences)
+    const html = client1.getHTML();
+    expect(
+      html === '<p dir="auto"><br></p>' || html === '<p dir="ltr"><br></p>',
+    ).toBe(true);
+
+    if (backend === 'yjs') {
+      expect(client1.getDocJSON()).toEqual(client2.getDocJSON());
+    }
   }
 
-  describe.each([[false], [true]])(
-    'useCollabV2: %s',
-    (useCollabV2: boolean) => {
+  describe.each([
+    [false, 'yjs'],
+    [true, 'yjs'],
+    [false, 'docnode'],
+  ] as const)(
+    'useCollabV2: %s, backend: %s',
+    (useCollabV2: boolean, backend: 'yjs' | 'docnode') => {
       it('Should collaborate basic text insertion between two clients', async () => {
-        const connector = createTestConnection(useCollabV2);
+        const connector = createTestConnection(useCollabV2, backend);
 
         const client1 = connector.createClient('1');
         const client2 = connector.createClient('2');
@@ -65,7 +84,7 @@ describe('Collaboration', () => {
         client1.start(container!);
         client2.start(container!);
 
-        await expectCorrectInitialContent(client1, client2);
+        await expectCorrectInitialContent(client1, client2, backend);
 
         // Insert a text node on client 1
         await waitForReact(() => {

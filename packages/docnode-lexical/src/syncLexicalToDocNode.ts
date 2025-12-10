@@ -2,6 +2,7 @@ import {Doc, type DocNode} from 'docnode';
 import {
   $getRoot,
   $isElementNode,
+  COLLABORATION_TAG,
   type ElementNode,
   type LexicalEditor,
   LexicalNode,
@@ -9,6 +10,21 @@ import {
 } from 'lexical';
 
 import {LexicalDocNode} from '.';
+
+// TODO: review this
+// Track which editor is currently making changes to prevent reapplying own changes
+const isApplyingOwnChanges = new WeakMap<LexicalEditor, boolean>();
+
+export function getIsApplyingOwnChanges(editor: LexicalEditor): boolean {
+  return isApplyingOwnChanges.get(editor) === true;
+}
+
+export function setIsApplyingOwnChanges(
+  editor: LexicalEditor,
+  value: boolean,
+): void {
+  isApplyingOwnChanges.set(editor, value);
+}
 
 export function syncLexicalToDocNode(
   doc: Doc,
@@ -20,7 +36,12 @@ export function syncLexicalToDocNode(
   editor.registerUpdateListener(
     ({editorState, dirtyElements, dirtyLeaves, tags}) => {
       // Skip if update came from DocNode to avoid infinite loop
-      if (tags.has('docnode')) {
+      if (tags.has(COLLABORATION_TAG)) {
+        return;
+      }
+
+      // Skip if this editor is currently applying its own changes
+      if (isApplyingOwnChanges.get(editor)) {
         return;
       }
 
@@ -29,19 +50,30 @@ export function syncLexicalToDocNode(
         return;
       }
 
-      // Read Lexical state and sync to DocNode
-      editorState.read(() => {
-        const lexicalRoot = $getRoot();
-        $syncLexicalToDocNode(
-          doc,
-          doc.root,
-          lexicalRoot,
-          dirtyElements,
-          dirtyLeaves,
-          lexicalKeyToDocNodeId,
-          docNodeIdToLexicalKey,
-        );
-      });
+      // Mark that this editor is making changes
+      isApplyingOwnChanges.set(editor, true);
+
+      try {
+        // Read Lexical state and sync to DocNode
+        editorState.read(() => {
+          const lexicalRoot = $getRoot();
+          $syncLexicalToDocNode(
+            doc,
+            doc.root,
+            lexicalRoot,
+            dirtyElements,
+            dirtyLeaves,
+            lexicalKeyToDocNodeId,
+            docNodeIdToLexicalKey,
+          );
+        });
+
+        // Force commit to trigger onChange handlers
+        doc.forceCommit();
+      } finally {
+        // Clear the flag synchronously after doc.forceCommit() completes
+        isApplyingOwnChanges.set(editor, false);
+      }
     },
   );
 }

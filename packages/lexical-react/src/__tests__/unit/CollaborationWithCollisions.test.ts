@@ -195,12 +195,16 @@ describe('CollaborationWithCollisions', () => {
     },
   ];
 
-  describe.each([[false], [true]])(
-    'useCollabV2: %s',
-    (useCollabV2: boolean) => {
+  describe.each([
+    [false, 'yjs'],
+    [true, 'yjs'],
+    [false, 'docnode'],
+  ] as const)(
+    'useCollabV2: %s, backend: %s',
+    (useCollabV2: boolean, backend: 'yjs' | 'docnode') => {
       SIMPLE_TEXT_COLLISION_TESTS.forEach((testCase) => {
         it(testCase.name, async () => {
-          const connection = createTestConnection(useCollabV2);
+          const connection = createTestConnection(useCollabV2, backend);
           const clients = createAndStartClients(
             connection,
             container!,

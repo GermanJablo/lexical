@@ -6,6 +6,8 @@
  *
  */
 
+import {LexicalDocNode} from '@lexical/docnode';
+import {DocNodeCollabPlugin} from '@lexical/react/DocNodeCollabPlugin';
 import {
   LexicalCollaboration,
   useCollaborationContext,
@@ -20,12 +22,15 @@ import {ContentEditable} from '@lexical/react/LexicalContentEditable';
 import {LexicalErrorBoundary} from '@lexical/react/LexicalErrorBoundary';
 import {RichTextPlugin} from '@lexical/react/LexicalRichTextPlugin';
 import {Provider, UserState} from '@lexical/yjs';
+import {Doc} from 'docnode';
 import {LexicalEditor} from 'lexical';
 import * as React from 'react';
 import {type Container, createRoot, type Root} from 'react-dom/client';
 import * as ReactTestUtils from 'shared/react-test-utils';
 import {expect} from 'vitest';
 import * as Y from 'yjs';
+
+export type CollabBackend = 'yjs' | 'docnode';
 
 function Editor({
   doc,
@@ -34,38 +39,51 @@ function Editor({
   awarenessData,
   shouldBootstrapEditor = true,
   useCollabV2 = false,
+  backend = 'yjs',
+  docnodeDoc,
 }: {
-  doc: Y.Doc;
-  provider: Provider;
+  doc?: Y.Doc;
+  provider?: Provider;
   setEditor: (editor: LexicalEditor) => void;
   awarenessData?: object | undefined;
   shouldBootstrapEditor?: boolean;
   useCollabV2?: boolean;
+  backend?: CollabBackend;
+  docnodeDoc?: Doc;
 }) {
-  const context = useCollaborationContext();
+  const context = backend === 'yjs' ? useCollaborationContext() : null;
 
   const [editor] = useLexicalComposerContext();
 
-  const {yjsDocMap} = context;
-  context.isCollabActive = true;
-  yjsDocMap.set('main', doc);
+  if (context && doc) {
+    const {yjsDocMap} = context;
+    context.isCollabActive = true;
+    yjsDocMap.set('main', doc);
+  }
 
   setEditor(editor);
 
   return (
     <>
-      {useCollabV2 ? (
+      {backend === 'docnode' && docnodeDoc ? (
+        <DocNodeCollabPlugin
+          doc={docnodeDoc}
+          onInit={() => {
+            // Doc already initialized
+          }}
+        />
+      ) : useCollabV2 ? (
         <CollaborationPluginV2__EXPERIMENTAL
           id="main"
-          doc={doc}
-          provider={provider}
+          doc={doc!}
+          provider={provider!}
           awarenessData={awarenessData}
           __shouldBootstrapUnsafe={shouldBootstrapEditor}
         />
       ) : (
         <CollaborationPlugin
           id="main"
-          providerFactory={() => provider}
+          providerFactory={() => provider!}
           shouldBootstrap={shouldBootstrapEditor}
           awarenessData={awarenessData}
         />
@@ -87,6 +105,8 @@ export class Client implements Provider {
   _connection: {
     _clients: Map<string, Client>;
     _useCollabV2: boolean;
+    _backend: CollabBackend;
+    _sharedDocNodeDoc?: Doc;
   };
   _connected: boolean = false;
   _doc: Y.Doc = new Y.Doc({gc: false});
@@ -108,7 +128,9 @@ export class Client implements Provider {
     this._connection = connection;
     this._onUpdate = this._onUpdate.bind(this);
 
-    this._doc.on('update', this._onUpdate);
+    if (connection._backend === 'yjs') {
+      this._doc.on('update', this._onUpdate);
+    }
 
     this.awareness = {
       getLocalState: () => this._awarenessState,
@@ -188,27 +210,47 @@ export class Client implements Provider {
 
     rootContainer.appendChild(container);
 
+    const backend = this._connection._backend;
+
     ReactTestUtils.act(() => {
       reactRoot.render(
-        <LexicalCollaboration>
+        backend === 'docnode' ? (
           <LexicalComposer
             initialConfig={{
               editorState: null,
-              namespace: '',
+              namespace: `DocNode-${this._id}`,
               onError: (e) => {
                 throw e;
               },
             }}>
             <Editor
-              provider={this}
-              doc={this._doc}
               setEditor={(editor) => (this._editor = editor)}
-              awarenessData={awarenessData}
-              shouldBootstrapEditor={options.shouldBootstrapEditor}
-              useCollabV2={this._connection._useCollabV2}
+              backend="docnode"
+              docnodeDoc={this._connection._sharedDocNodeDoc}
             />
           </LexicalComposer>
-        </LexicalCollaboration>,
+        ) : (
+          <LexicalCollaboration>
+            <LexicalComposer
+              initialConfig={{
+                editorState: null,
+                namespace: '',
+                onError: (e) => {
+                  throw e;
+                },
+              }}>
+              <Editor
+                provider={this}
+                doc={this._doc}
+                setEditor={(editor) => (this._editor = editor)}
+                awarenessData={awarenessData}
+                shouldBootstrapEditor={options.shouldBootstrapEditor}
+                useCollabV2={this._connection._useCollabV2}
+                backend="yjs"
+              />
+            </LexicalComposer>
+          </LexicalCollaboration>
+        ),
       );
     });
   }
@@ -288,13 +330,53 @@ export class Client implements Provider {
   }
 }
 
+export function bootstrapDoc(doc: Doc): void {
+  if (doc.root.first) {
+    // Already has content, don't bootstrap
+    return;
+  }
+
+  const paragraph = doc.createNode(LexicalDocNode);
+  paragraph.state.j.set({
+    children: [],
+    direction: null,
+    format: '',
+    indent: 0,
+    textFormat: 0,
+    textStyle: '',
+    type: 'paragraph',
+    version: 1,
+  });
+
+  doc.root.append(paragraph);
+  doc.forceCommit();
+}
+
 export class TestConnection {
-  _clients = new Map<string, Client>();
+  _clients: Map<string, Client> = new Map();
+  _useCollabV2: boolean;
+  _backend: CollabBackend;
+  _sharedDocNodeDoc?: Doc;
 
-  constructor(readonly _useCollabV2: boolean) {}
+  constructor(useCollabV2: boolean, backend: CollabBackend = 'yjs') {
+    this._useCollabV2 = useCollabV2;
+    this._backend = backend;
 
-  createClient(id: string) {
+    // For DocNode, create a single shared Doc instance
+    if (backend === 'docnode') {
+      this._sharedDocNodeDoc = new Doc({
+        extensions: [{nodes: [LexicalDocNode]}],
+      });
+      bootstrapDoc(this._sharedDocNodeDoc);
+    }
+  }
+
+  createClient(id: string, opts?: {gc?: boolean}) {
     const client = new Client(id, this);
+
+    if (this._backend === 'yjs' && opts?.gc) {
+      client._doc = new Y.Doc();
+    }
 
     this._clients.set(id, client);
 
@@ -302,8 +384,11 @@ export class TestConnection {
   }
 }
 
-export function createTestConnection(useCollabV2: boolean) {
-  return new TestConnection(useCollabV2);
+export function createTestConnection(
+  useCollabV2: boolean,
+  backend: CollabBackend = 'yjs',
+) {
+  return new TestConnection(useCollabV2, backend);
 }
 
 export async function waitForReact(cb: () => void) {

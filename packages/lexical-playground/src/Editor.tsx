@@ -8,11 +8,13 @@
 
 import type {JSX} from 'react';
 
+import {docToLexical} from '@lexical/docnode';
 import {AutoFocusPlugin} from '@lexical/react/LexicalAutoFocusPlugin';
 import {CharacterLimitPlugin} from '@lexical/react/LexicalCharacterLimitPlugin';
 import {CheckListPlugin} from '@lexical/react/LexicalCheckListPlugin';
 import {ClearEditorPlugin} from '@lexical/react/LexicalClearEditorPlugin';
 import {ClickableLinkPlugin} from '@lexical/react/LexicalClickableLinkPlugin';
+import {useCollaborationContext} from '@lexical/react/LexicalCollaborationContext';
 import {
   CollaborationPlugin,
   CollaborationPluginV2__EXPERIMENTAL,
@@ -30,7 +32,9 @@ import {TabIndentationPlugin} from '@lexical/react/LexicalTabIndentationPlugin';
 import {TablePlugin} from '@lexical/react/LexicalTablePlugin';
 import {useLexicalEditable} from '@lexical/react/useLexicalEditable';
 import {CAN_USE_DOM} from '@lexical/utils';
-import {useEffect, useMemo, useState} from 'react';
+import {CONNECTED_COMMAND, TOGGLE_CONNECT_COMMAND} from '@lexical/yjs';
+import {COMMAND_PRIORITY_EDITOR} from 'lexical';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {Doc} from 'yjs';
 
 import {
@@ -39,6 +43,7 @@ import {
 } from './collaboration';
 import {useSettings} from './context/SettingsContext';
 import {useSharedHistoryContext} from './context/SharedHistoryContext';
+import {createDocNodeWebsocketProvider} from './docnode-collaboration';
 import ActionsPlugin from './plugins/ActionsPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
 import AutoEmbedPlugin from './plugins/AutoEmbedPlugin';
@@ -98,6 +103,7 @@ export default function Editor(): JSX.Element {
       isCodeShiki,
       isCollab,
       useCollabV2,
+      useDocNode,
       isAutocomplete,
       isMaxLength,
       isCharLimit,
@@ -117,6 +123,7 @@ export default function Editor(): JSX.Element {
       listStrictIndent,
     },
   } = useSettings();
+
   const isEditable = useLexicalEditable();
   const placeholder = isCollab
     ? 'Enter some collaborative rich text...'
@@ -191,13 +198,20 @@ export default function Editor(): JSX.Element {
         <DateTimePlugin />
         {!(isCollab && useCollabV2) && (
           <CommentPlugin
-            providerFactory={isCollab ? createWebsocketProvider : undefined}
+            providerFactory={
+              isCollab && !useDocNode ? createWebsocketProvider : undefined
+            }
           />
         )}
         {isRichText ? (
           <>
             {isCollab ? (
-              useCollabV2 ? (
+              useDocNode ? (
+                <CollabDocNode
+                  id={COLLAB_DOC_ID}
+                  shouldBootstrap={!skipCollaborationInit}
+                />
+              ) : useCollabV2 ? (
                 <>
                   <CollabV2
                     id={COLLAB_DOC_ID}
@@ -332,4 +346,84 @@ function CollabV2({
       __shouldBootstrapUnsafe={shouldBootstrap}
     />
   );
+}
+
+function CollabDocNode({
+  id,
+  shouldBootstrap,
+}: {
+  id: string;
+  shouldBootstrap: boolean;
+}) {
+  const isBindingInitialized = useRef(false);
+  const [editor] = useLexicalComposerContext();
+  const collabContext = useCollaborationContext();
+  const [provider, setProvider] =
+    useState<ReturnType<typeof createDocNodeWebsocketProvider>>();
+
+  // Mark collaboration as active
+  useEffect(() => {
+    collabContext.isCollabActive = true;
+
+    return () => {
+      // Reset flag only when unmounting top level editor collab plugin
+      if (editor._parentEditor == null) {
+        collabContext.isCollabActive = false;
+      }
+    };
+  }, [collabContext, editor]);
+
+  useEffect(() => {
+    if (isBindingInitialized.current) {
+      return;
+    }
+
+    isBindingInitialized.current = true;
+
+    const newProvider = createDocNodeWebsocketProvider(id);
+    setProvider(newProvider);
+    const doc = newProvider.doc;
+
+    // Initialize docToLexical binding first
+    docToLexical(editor, doc);
+
+    // Connect to WebSocket server and dispatch command
+    newProvider.connect();
+
+    // Dispatch connected command on next tick to ensure ActionsPlugin has registered
+    queueMicrotask(() => {
+      editor.dispatchCommand(CONNECTED_COMMAND, true);
+    });
+
+    return () => {
+      editor.dispatchCommand(CONNECTED_COMMAND, false);
+      // Don't destroy provider - it's a singleton that may be used by other components
+      // newProvider.destroy();
+    };
+  }, [editor, id, shouldBootstrap]);
+
+  // Register TOGGLE_CONNECT_COMMAND
+  useEffect(() => {
+    if (!provider) {
+      return;
+    }
+
+    return editor.registerCommand(
+      TOGGLE_CONNECT_COMMAND,
+      (payload) => {
+        const shouldConnect = payload;
+
+        if (shouldConnect) {
+          provider.connect();
+        } else {
+          provider.disconnect();
+        }
+
+        return true;
+      },
+      COMMAND_PRIORITY_EDITOR,
+    );
+  }, [editor, provider]);
+
+  return null;
 }
